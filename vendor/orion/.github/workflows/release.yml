@@ -1,0 +1,51 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+    - '*'
+
+jobs:
+  release:
+    # needed to be able to create a Release
+    permissions:
+      contents: write
+    # We need to use an old runner for Xcode 11.7
+    runs-on: macos-11
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        path: orion
+    - name: Set Up Dependencies
+      id: setup
+      run: |
+        brew install ldid make fakeroot
+        echo "THEOS=${GITHUB_WORKSPACE}/theos" >> "${GITHUB_ENV}"
+        echo "PATH=/usr/local/opt/make/libexec/gnubin:${PATH}" >> "${GITHUB_ENV}"
+        echo "version=${GITHUB_REF#refs/tags/}" >> "${GITHUB_OUTPUT}"
+    - name: Install Theos
+      uses: actions/checkout@v4
+      with:
+        repository: theos/theos
+        path: theos
+        submodules: recursive
+    - name: Build Release
+      run: |
+        cd orion
+        # Orion doesnt build with 12.5 atm due to a compiler bug (SR-14535)
+        DEVELOPER_DIR=/Applications/Xcode_12.4.app/Contents/Developer make clean package FINALPACKAGE=1
+        DEVELOPER_DIR=/Applications/Xcode_12.4.app/Contents/Developer make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+        DEVELOPER_DIR=/Applications/Xcode_11.7.app/Contents/Developer make clean package FINALPACKAGE=1
+        cd packages
+        zip -yr9 Orion_${{ steps.setup.outputs.version }}.zip *
+    - name: Create Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release create ${{ github.ref_name }} \
+        --verify-tag \
+        --draft \
+        --repo ${{ github.repository }} \
+        --title '${{ steps.setup.outputs.version }}' \
+        orion/packages/Orion_${{ steps.setup.outputs.version }}.zip
